@@ -1,4 +1,12 @@
-﻿namespace ItemsWorkService.Enums
+namespace ItemsWorkService.Enums
 {
-    public enum ItemStatus { Pending, Completed }
+    /// <summary>
+    /// Representa el estado de un ítem de trabajo.
+    /// </summary>
+    public enum ItemStatus 
+    { 
+        Pending, 
+        InProgress, 
+        Completed 
+    }
 }

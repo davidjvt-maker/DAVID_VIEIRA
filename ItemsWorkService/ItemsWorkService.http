@@ -1,6 +1,24 @@
-@ItemsWorkService_HostAddress = http://localhost:5207
+@ItemsWorkService_HostAddress = https://localhost:7288
 
-GET {{ItemsWorkService_HostAddress}}/weatherforecast/
+### Obtener todos los ítems de trabajo
+GET {{ItemsWorkService_HostAddress}}/api/workitems
 Accept: application/json
 
 ###
+
+### Obtener ítems de trabajo por usuario
+GET {{ItemsWorkService_HostAddress}}/api/workitems/user/usuario_juan
+Accept: application/json
+
+###
+
+### Crear y distribuir un nuevo ítem de trabajo
+POST {{ItemsWorkService_HostAddress}}/api/workitems/distribute
+Content-Type: application/json
+
+{
+  "title": "Implementar autenticación",
+  "deliveryDate": "2026-07-10T10:00:00",
+  "relevance": 0,
+  "status": 0
+}

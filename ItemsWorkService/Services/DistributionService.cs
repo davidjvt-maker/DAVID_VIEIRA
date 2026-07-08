@@ -1,102 +1,138 @@
-﻿using ItemsWorkService.Enums;
-using ItemsWorkService.Models;
+﻿using ItemsWorkService.Models;
+using ItemsWorkService.Enums;
+using System.Net.Http.Json;
 
-namespace ItemsWorkService.Services;
-
-public class DistributionService : IDistributionService
+namespace ItemsWorkService.Services
 {
-    private readonly HttpClient _httpClient;
-
-    // Inyectamos el HttpClient a través del constructor
-    public DistributionService(HttpClient httpClient)
+    /// <summary>
+    /// Implementación del servicio de distribución de ítems.
+    /// </summary>
+    public class DistributionService : IDistributionService
     {
-        _httpClient = httpClient;
-    }
+        private readonly HttpClient _httpClient;
+        private readonly IWorkItemRepository _repository;
 
-    public async Task<WorkItem> AssignItemAsync(WorkItem item)
-    {
-        List<UserWorkloadSummary> candidates;
-
-        try
+        /// <summary>
+        /// Constructor con inyección de dependencias.
+        /// </summary>
+        public DistributionService(HttpClient httpClient, IWorkItemRepository repository)
         {
-            var usernames = await _httpClient.GetFromJsonAsync<List<string>>("https://localhost:5001/api/users");
+            _httpClient = httpClient;
+            _repository = repository;
+        }
 
-            if (usernames == null || !usernames.Any())
+        /// <summary>
+        /// Asigna un ítem a un usuario basado en reglas de negocio (saturación, fecha de entrega).
+        /// </summary>
+        public async Task<AssignmentResult> AssignItemAsync(WorkItem item)
+        {
+            List<UserWorkloadSummary> candidates;
+
+            try
             {
-                throw new Exception("No users were found available in the UserService.");
+                var usernames = await _httpClient.GetFromJsonAsync<List<string>>("api/users");
+
+                if (usernames == null || !usernames.Any())
+                {
+                    throw new Exception("No users were found available in the UserService.");
+                }
+
+                candidates = usernames.Select(name => new UserWorkloadSummary { Username = name }).ToList();
+
+                foreach (var c in candidates)
+                {
+                    var items = _repository.GetByUser(c.Username);
+                    if (items != null && items.Any())
+                    {
+                        c.Items = items;
+                    }
+                    else
+                    {
+                        LoadSimulatedTasks(new List<UserWorkloadSummary> { c });
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                candidates = GetMockUsersWorkload();
             }
 
-            // Transformamos los nombres de usuario en nuestro modelo de resumen simulando sus tareas actuales
-            candidates = usernames.Select(name => new UserWorkloadSummary { Username = name }).ToList();
+            // REGLA DE NEGOCIO: Ningún usuario saturado debe ser considerado.
+            // Utilizamos la propiedad IsSaturated explícitamente.
+            var availableUsers = candidates.Where(u => !u.IsSaturated).ToList();
 
-            LoadSimulatedTasks(candidates);
-        }
-        catch (Exception)
-        {
-            // Si el microservicio de usuarios está apagado, no rompemos la app
-            candidates = GetMockUsersWorkload();
-        }
-
-        // Excluimos usuarios que tengan más de 3 ítems pendientes de ALTA relevancia
-        var availableUsers = candidates.Where(u => u.HighRelevanceCount <= 3).ToList();
-
-        // Si todos están saturados, por seguridad usamos la lista completa para no dejar el ítem en el aire
-        if (!availableUsers.Any())
-        {
-            availableUsers = candidates;
-        }
-
-        UserWorkloadSummary? chosenUser = null;
-
-        // EVALUACIÓN DE FECHA PRÓXIMA (< 3 días)
-        double diasRestantes = (item.DeliveryDate.Date - DateTime.Today).TotalDays;
-
-        if (diasRestantes < 3)
-        {
-            // Asignar al usuario con MENOS ítems totales acumulados
-            chosenUser = availableUsers
-                .OrderBy(u => u.TotalItems)
-                .FirstOrDefault();
-        }
-        //EVALUACIÓN POR RELEVANCIA GENERAL (Fecha holgada)
-        else
-        {
-            // Asignar al usuario con MENOS ítems PENDIENTES generales
-            chosenUser = availableUsers
-                .OrderBy(u => u.PendingCount)
-                .FirstOrDefault();
-        }
-
-        //ASIGNACIÓN Y ORDENAMIENTO POST-ASIGNACIÓN
-        if (chosenUser != null)
-        {
-            item.AssignedUsername = chosenUser.Username;
-
-            // Añadimos el ítem a su lista y la ordenamos por fecha de entrega de forma ascendente
-            chosenUser.Items.Add(item);
-            chosenUser.Items = chosenUser.Items.OrderBy(i => i.DeliveryDate).ToList();
-        }
-
-        return item;
-    }
-
-    private void LoadSimulatedTasks(List<UserWorkloadSummary> users)
-    {
-        foreach (var u in users)
-        {
-            if (u.Username == "usuario_juan")
+            // Fallback: Si todos están saturados, usamos todos los candidatos para no perder el ítem.
+            if (!availableUsers.Any())
             {
-                u.Items.Add(new WorkItem { Id = Guid.NewGuid(), Title = "Tarea vieja", Relevance = Relevance.High, Status = ItemStatus.Pending });
+                availableUsers = candidates;
+            }
+
+            UserWorkloadSummary? chosenUser = null;
+            string reason = "";
+
+            // EVALUACIÓN DE FECHA PRÓXIMA (< 3 días)
+            double remainingDays = (item.DeliveryDate.Date - DateTime.Today).TotalDays;
+
+            if (remainingDays < 3)
+            {
+                // Asignar al usuario con MENOS ítems totales acumulados
+                chosenUser = availableUsers
+                    .OrderBy(u => u.TotalItems)
+                    .FirstOrDefault();
+                reason = "Asignado por fecha próxima (menos de 3 días) al usuario con menor carga total.";
+            }
+            // EVALUACIÓN POR RELEVANCIA GENERAL (Fecha holgada)
+            else
+            {
+                // Asignar al usuario con MENOS ítems PENDIENTES generales
+                chosenUser = availableUsers
+                    .OrderBy(u => u.PendingCount)
+                    .FirstOrDefault();
+                reason = "Asignado por disponibilidad general al usuario con menos ítems pendientes.";
+            }
+
+            if (chosenUser != null)
+            {
+                item.AssignedUsername = chosenUser.Username;
+
+                // Añadimos el ítem a su lista y la ordenamos por fecha de entrega
+                chosenUser.Items.Add(item);
+                chosenUser.Items = chosenUser.Items.OrderBy(i => i.DeliveryDate).ToList();
+            }
+
+            return new AssignmentResult
+            {
+                Item = item,
+                AssignmentReason = reason,
+                IsNearingSaturation = chosenUser?.HighRelevanceCount >= 3
+            };
+        }
+
+        private void LoadSimulatedTasks(List<UserWorkloadSummary> users)
+        {
+            foreach (var u in users)
+            {
+                if (u.Username == "usuario_juan")
+                {
+                    u.Items.Add(new WorkItem
+                    {
+                        Id = Guid.NewGuid(),
+                        Title = "Tarea vieja",
+                        Relevance = Relevance.High,
+                        Status = ItemStatus.Pending,
+                        DeliveryDate = DateTime.Today.AddDays(5)
+                    });
+                }
             }
         }
-    }
 
-    private List<UserWorkloadSummary> GetMockUsersWorkload()
-    {
-        return new List<UserWorkloadSummary>
+        private List<UserWorkloadSummary> GetMockUsersWorkload()
         {
-            new UserWorkloadSummary { Username = "usuario_juan" },
-            new UserWorkloadSummary { Username = "usuario_maria" }
-        };
+            return new List<UserWorkloadSummary>
+            {
+                new UserWorkloadSummary { Username = "usuario_juan" },
+                new UserWorkloadSummary { Username = "usuario_maria" }
+            };
+        }
     }
 }
