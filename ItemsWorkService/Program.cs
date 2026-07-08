@@ -1,4 +1,5 @@
 using ItemsWorkService.Services;
+using ItemsWorkService.Interfaces;
 using System.Reflection;
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,7 +8,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     // Configurar XML Comments
-    var xmlFile = "Anonymously Hosted DynamicMethods Assembly.xml";
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = System.IO.Path.Combine(AppContext.BaseDirectory, xmlFile);
     if(System.IO.File.Exists(xmlPath))
     {

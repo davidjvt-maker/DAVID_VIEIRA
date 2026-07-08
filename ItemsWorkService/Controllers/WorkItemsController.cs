@@ -1,5 +1,6 @@
 using ItemsWorkService.Models;
 using ItemsWorkService.Services;
+using ItemsWorkService.Interfaces;
 using ItemsWorkService.Enums;
 using Microsoft.AspNetCore.Mvc;
 

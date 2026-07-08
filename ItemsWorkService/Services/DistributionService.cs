@@ -1,5 +1,6 @@
-﻿using ItemsWorkService.Models;
+using ItemsWorkService.Models;
 using ItemsWorkService.Enums;
+using ItemsWorkService.Interfaces;
 using System.Net.Http.Json;
 
 namespace ItemsWorkService.Services
@@ -9,6 +10,11 @@ namespace ItemsWorkService.Services
     /// </summary>
     public class DistributionService : IDistributionService
     {
+        /// <summary>
+        /// Umbral máximo de ítems de alta relevancia pendientes permitidos antes de considerar saturado al usuario.
+        /// </summary>
+        private const int SaturationThreshold = 3;
+
         private readonly HttpClient _httpClient;
         private readonly IWorkItemRepository _repository;
 
@@ -19,6 +25,27 @@ namespace ItemsWorkService.Services
         {
             _httpClient = httpClient;
             _repository = repository;
+        }
+
+        /// <summary>
+        /// Determina si un usuario está saturado verificando que la cantidad de ítems 
+        /// de alta relevancia pendientes supere el umbral definido (>3).
+        /// </summary>
+        /// <param name="username">El nombre del usuario a evaluar.</param>
+        /// <returns>True si el usuario tiene más de 3 ítems de alta relevancia pendientes.</returns>
+        public bool IsUserSaturated(string username)
+        {
+            var userItems = _repository.GetByUser(username);
+
+            if (userItems == null || !userItems.Any())
+            {
+                return false;
+            }
+
+            int highRelevancePendingCount = userItems
+                .Count(i => i.Relevance == Enums.Relevance.High && i.Status == Enums.ItemStatus.Pending);
+
+            return highRelevancePendingCount > SaturationThreshold;
         }
 
         /// <summary>
@@ -57,9 +84,12 @@ namespace ItemsWorkService.Services
                 candidates = GetMockUsersWorkload();
             }
 
-            // REGLA DE NEGOCIO: Ningún usuario saturado debe ser considerado.
-            // Utilizamos la propiedad IsSaturated explícitamente.
-            var availableUsers = candidates.Where(u => !u.IsSaturated).ToList();
+            // REGLA DE NEGOCIO: Verificación explícita de saturación por usuario.
+            // Se invoca IsUserSaturated() para cada candidato antes de permitir la asignación.
+            // Un usuario está saturado si tiene más de 3 ítems de alta relevancia pendientes.
+            var availableUsers = candidates
+                .Where(u => !IsUserSaturated(u.Username))
+                .ToList();
 
             // Fallback: Si todos están saturados, usamos todos los candidatos para no perder el ítem.
             if (!availableUsers.Any())
@@ -95,17 +125,33 @@ namespace ItemsWorkService.Services
             {
                 item.AssignedUsername = chosenUser.Username;
 
-                // Añadimos el ítem a su lista y la ordenamos por fecha de entrega
+                // Añadimos el ítem y ordenamos la lista post-asignación
                 chosenUser.Items.Add(item);
-                chosenUser.Items = chosenUser.Items.OrderBy(i => i.DeliveryDate).ToList();
+                SortItemsByDeliveryDate(chosenUser);
             }
 
             return new AssignmentResult
             {
                 Item = item,
                 AssignmentReason = reason,
-                IsNearingSaturation = chosenUser?.HighRelevanceCount >= 3
+                IsNearingSaturation = chosenUser != null && IsUserSaturated(chosenUser.Username)
             };
+        }
+
+        /// <summary>
+        /// Ordena la lista de ítems de un usuario por fecha de entrega (ascendente)
+        /// después de cada asignación, garantizando que los ítems más urgentes
+        /// queden al inicio de la lista.
+        /// </summary>
+        /// <param name="user">El resumen de carga del usuario cuyos ítems se van a ordenar.</param>
+        public void SortItemsByDeliveryDate(UserWorkloadSummary user)
+        {
+            if (user == null || user.Items == null || !user.Items.Any())
+            {
+                return;
+            }
+
+            user.Items = user.Items.OrderBy(i => i.DeliveryDate).ToList();
         }
 
         private void LoadSimulatedTasks(List<UserWorkloadSummary> users)

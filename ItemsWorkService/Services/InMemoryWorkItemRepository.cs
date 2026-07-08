@@ -1,5 +1,6 @@
-﻿using ItemsWorkService.Models;
+using ItemsWorkService.Models;
 using ItemsWorkService.Enums;
+using ItemsWorkService.Interfaces;
 
 namespace ItemsWorkService.Services
 {

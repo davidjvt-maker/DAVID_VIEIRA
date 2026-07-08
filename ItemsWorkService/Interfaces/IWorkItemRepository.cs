@@ -1,7 +1,7 @@
 using ItemsWorkService.Models;
 using ItemsWorkService.Enums;
 
-namespace ItemsWorkService.Services
+namespace ItemsWorkService.Interfaces
 {
     /// <summary>
     /// Interfaz para el repositorio de ítems de trabajo.

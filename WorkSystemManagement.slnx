@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="ItemsWorkService/ItemsWorkService.csproj" />
-  <Project Path="UserService/UserService.csproj" />
-  <Project Path="WorkSystemManagement.Tests/WorkSystemManagement.Tests.csproj" />
-</Solution>
