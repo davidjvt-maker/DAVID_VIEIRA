@@ -14,12 +14,16 @@ builder.Services.AddSwaggerGen(c =>
     }
 });
 
-// Habilitar CORS para pruebas
+// Habilitar CORS con orígenes restringidos
+var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod();
+        policy.WithOrigins(allowedOrigins)
+              .AllowAnyHeader()
+              .AllowAnyMethod();
     });
 });
 
